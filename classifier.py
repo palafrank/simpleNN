@@ -1,3 +1,5 @@
+import sys
+import getopt
 import numpy as np
 import scipy
 from scipy import ndimage
@@ -138,48 +140,83 @@ def update_parameters(parameters, grads, learning_rate):
         new_params.append((W, b))
     return new_params
 
-
-def train_model(X, Y, parameters, learning_rate, num_iterations):
-    N = len(parameters)
-    print ("Num layers:" + str(N))
-    for i in range(num_iterations):
-        AL, forward_cache = forward_propagate(X, parameters, N)
-        c = compute_cost(AL, YL)
-        if i % 100 == 0:
-            print("Cost at iteration " + str(i) + " : ", str(c))
-        grads = back_propagate(AL, Y, forward_cache)
-        #print (grads)
-        parameters = update_parameters(parameters, grads, learning_rate)
-    return parameters
-
-def test_model(X, Y, parameters):
-    m = X.shape[1]
-    N = len(parameters)
-    AL, forward_cache = forward_propagate(X, parameters, N)
+def calculate_success(Y, AL):
     p = np.around(AL)
     for i in range(len(p[0])):
         if(p[0][i] != Y[0][i]):
             p[0][i] = 0
         else:
             p[0][i] = 1
-    print (p)
     return np.squeeze(np.sum(p, axis=1, keepdims=1)/len(p[0]))
 
+def train_model(X, Y, parameters, learning_rate, num_iterations):
+    N = len(parameters)
+    print ("Num layers:" + str(N))
+    for i in range(num_iterations):
+        AL, forward_cache = forward_propagate(X, parameters, N)
+        c = compute_cost(AL, Y)
+        if i % 100 == 0:
+            print("Cost at iteration " + str(i) + " : ", str(c))
+        grads = back_propagate(AL, Y, forward_cache)
+        #print (grads)
+        parameters = update_parameters(parameters, grads, learning_rate)
+    print ("Trained model success rate: " +  str(calculate_success(Y, AL) *100) + "%")
+    return parameters
 
+def test_model(X, Y, parameters):
+    m = X.shape[1]
+    N = len(parameters)
+    AL, forward_cache = forward_propagate(X, parameters, N)
+    return calculate_success(Y, AL)
+    
+def print_help():
+    print ("classifier.py -l <learn_dir> -t <test_dir> -r <learn_rate> -i <num iterations> -n \"<comma separated num nodes in each layer>\"")
+def main(argv):
+    np.random.seed(1)
+    learn_dir = "./images"
+    test_dir = "./test"
+    learning_rate = 0.01
+    num_iterations = 4000
+    dims = [4, 1]
 
-np.random.seed(1)
-XL, YL = collect_data("./images")
-XT, YT = collect_data("./test")
+    try:
+        opts, args = getopt.getopt(argv, "hl:t:r:i:n:",["help", "learndir=", "testdir=", "learnrate=", "iters=", "net="])
+    except getopt.GetoptError:
+        print_help()
+        sys.exit(2)
+    for opt, arg in opts:
+        if opt == "-h":
+            print_help()
+            sys.exit(2)
+        elif opt == "-l":
+            learn_dir = arg
+        elif opt == "-t":
+            test_dir == arg
+        elif opt == "-r":
+            learning_rate = float(arg)
+        elif opt == "-i":
+            num_iterations = int(arg)
+        elif opt == "-n":
+            dims_str = arg.split(",")
+            dims = []
+            for num in dims_str:
+                dims.append(int(num))
+        else:
+            print_help()
+            sys.exit(2)
+    XL, YL = collect_data(learn_dir)
+    XT, YT = collect_data(test_dir)
+    #Starting Hyperparameters
+    lists_dims = [XL.shape[0]]
+    for num in dims:
+        lists_dims.append(num)
+    print(lists_dims)
+    #Train the model
+    parameters = initialize_parameters(lists_dims)
+    parameters = train_model(XL, YL, parameters, learning_rate, num_iterations)
+    # check out the success rate with a test run
+    success_rate = test_model(XT, YT, parameters)
+    print ("Success rate: " + str(success_rate*100) + "%")
 
-
-#Starting Hyperparameters
-lists_dims = [XL.shape[0], 4, 1]
-learning_rate = 0.01
-num_iterations = 4000
-
-#Train the model
-parameters = initialize_parameters(lists_dims)
-parameters = train_model(XL, YL, parameters, learning_rate, num_iterations)
-
-success_rate = test_model(XT, YT, parameters)
-print ("Success rate: " + str(success_rate*100) + "%")
+if __name__ == "__main__" :
+    main(sys.argv[1:])

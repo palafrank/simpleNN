@@ -4,6 +4,7 @@ import numpy as np
 import scipy
 from scipy import ndimage
 from os import listdir
+import matplotlib.pyplot as plt
 
 def Read_File(fname):
     a = ndimage.imread(fname, flatten=False)
@@ -37,7 +38,9 @@ def collect_data(dirname):
 def initialize_parameters(lists_dims):
     parameters = []
     for i in range(1, len(lists_dims)):
-        parameters.append((np.random.randn(lists_dims[i], lists_dims[i-1]) * 0.01, np.zeros((lists_dims[i], 1))))
+        W = np.random.randn(lists_dims[i], lists_dims[i-1]) * np.sqrt(np.divide(2, lists_dims[i-1]))
+        b = np.zeros((lists_dims[i], 1))
+        parameters.append((W, b))
     return parameters
 
 #Activation Functions
@@ -87,6 +90,15 @@ def forward_propagate(X, parameters, N):
     #print (AL)
     return AL, forward_cache
 
+def regularize_cost(cost, m, lamba, parameters):
+    if lamba == 0:
+        return cost
+    W, b = parameters[len(parameters)-1]
+    n = np.linalg.norm(W)
+    normalize = np.divide(lamba, 2*m)*n
+    cost = cost + normalize
+    return cost
+
 def compute_cost(AL, Y):
     m = Y.shape[1]
     cost = -(np.sum(np.multiply(Y, np.log(AL)) + np.multiply((1-Y), np.log(1-AL))))/Y.shape[1]
@@ -128,7 +140,13 @@ def back_propagate(AL, Y, forward_cache):
         activation_func = "sigmoid"
     return grads
 
-def update_parameters(parameters, grads, learning_rate):
+def regularize_weights(W, m, learning_rate, lamba):
+    if lamba == 0:
+        return W
+    W = W - np.multiply(np.divide(np.multiply(learning_rate, lamba), m), W)
+    return W
+
+def update_parameters(m, parameters, grads, learning_rate, lamba):
     new_params = []
     j=len(parameters)-1
     for i in range(len(parameters)):
@@ -136,6 +154,7 @@ def update_parameters(parameters, grads, learning_rate):
         dW, db = grads[j]
         j = j-1
         W = W - (learning_rate * dW)
+        W = regularize_weights(W, m, learning_rate, lamba)
         b = b - (learning_rate * db)
         new_params.append((W, b))
     return new_params
@@ -149,28 +168,40 @@ def calculate_success(Y, AL):
             p[0][i] = 1
     return np.squeeze(np.sum(p, axis=1, keepdims=1)/len(p[0]))
 
-def train_model(X, Y, parameters, learning_rate, num_iterations):
+def train_model(X, Y, parameters, learning_rate, num_iterations, lamba = 0.01):
     N = len(parameters)
+    m = X.shape[1]
+    cost = []
     print ("Num layers:" + str(N))
     for i in range(num_iterations):
         AL, forward_cache = forward_propagate(X, parameters, N)
         c = compute_cost(AL, Y)
+        c = regularize_cost(c, m, lamba, parameters)
+        cost.append(c)
         if i % 100 == 0:
             print("Cost at iteration " + str(i) + " : ", str(c))
         grads = back_propagate(AL, Y, forward_cache)
         #print (grads)
-        parameters = update_parameters(parameters, grads, learning_rate)
+        parameters = update_parameters(m, parameters, grads, learning_rate, lamba)
     print ("Trained model success rate: " +  str(calculate_success(Y, AL) *100) + "%")
-    return parameters
+    return parameters, cost
 
 def test_model(X, Y, parameters):
     m = X.shape[1]
     N = len(parameters)
     AL, forward_cache = forward_propagate(X, parameters, N)
     return calculate_success(Y, AL)
-    
+
 def print_help():
     print ("classifier.py -l <learn_dir> -t <test_dir> -r <learn_rate> -i <num iterations> -n \"<comma separated num nodes in each layer>\"")
+
+def plot_cost_gradient(cost):
+    plt.plot(cost)
+    plt.ylabel("Cost")
+    plt.xlabel("Per 100 iterations")
+    plt.title("Cost gradient")
+    plt.show()
+
 def main(argv):
     np.random.seed(1)
     learn_dir = "./images"
@@ -213,10 +244,11 @@ def main(argv):
     print(lists_dims)
     #Train the model
     parameters = initialize_parameters(lists_dims)
-    parameters = train_model(XL, YL, parameters, learning_rate, num_iterations)
+    parameters, cost = train_model(XL, YL, parameters, learning_rate, num_iterations)
     # check out the success rate with a test run
     success_rate = test_model(XT, YT, parameters)
     print ("Success rate: " + str(success_rate*100) + "%")
+    plot_cost_gradient(cost)
 
 if __name__ == "__main__" :
     main(sys.argv[1:])

@@ -31,16 +31,30 @@ def collect_data(dirname):
         i = i+1
     return X, Y
 
-
+def initialize_hyperparams():
+    hyperparams = {}
+    hyperparams["learning_rate"] = 0.01 # Learning rate of gradient descent
+    hyperparams["num_iterations"] = 4000 # Number of iterations of propagation
+    hyperparams["dims"] = [4, 1] # Number of nodes in each layer of NN
+    hyperparams["lamba"] = 0.01 # Regularization param lambda
+    hyperparams["beta1"] = 0.9 # Exponential Weighted average param
+    hyperparams["beta2"] = 0.999 # RMSProp param
+    hyperparams["epsilon"] = 10 ** -8 # Adams optimization zero correction
+    return hyperparams
 
 # Initialize the parameters
 # lists_dims["n_x=l0", "l1", "l2" ....]
 def initialize_parameters(lists_dims):
     parameters = []
     for i in range(1, len(lists_dims)):
+        # 'He' initialization for random weights
         W = np.random.randn(lists_dims[i], lists_dims[i-1]) * np.sqrt(np.divide(2, lists_dims[i-1]))
+        Vw = np.zeros(W.shape)
+        Sw = np.zeros(W.shape)
         b = np.zeros((lists_dims[i], 1))
-        parameters.append((W, b))
+        Vb = np.zeros(b.shape)
+        Sb = np.zeros(b.shape)
+        parameters.append((W, b, Vw, Vb, Sw, Sb))
     return parameters
 
 #Activation Functions
@@ -79,12 +93,12 @@ def forward_propagate(X, parameters, N):
     AL = A
     for i in range(N):
         A = AL
-        W, b = parameters[i]
+        W, b, Vw, Vb, Sw, Sb = parameters[i]
         Z = np.dot(W, A) + b
         if i == N-1 :
             activation_func = "sigmoid"
         else:
-            activation_func = "sigmoid"
+            activation_func = "relu"
         AL = forward_activation(Z, activation_func)
         forward_cache.append((A, Z, W, b))
     #print (AL)
@@ -93,7 +107,7 @@ def forward_propagate(X, parameters, N):
 def regularize_cost(cost, m, lamba, parameters):
     if lamba == 0:
         return cost
-    W, b = parameters[len(parameters)-1]
+    W, b, Vw, Vb, Sw, Sb = parameters[len(parameters)-1]
     n = np.linalg.norm(W)
     normalize = np.divide(lamba, 2*m)*n
     cost = cost + normalize
@@ -137,7 +151,7 @@ def back_propagate(AL, Y, forward_cache):
         dA_prev, dW, db = back_propagate_activation(dA, cache, activation_func)
         grads.append((dW, db))
         dA = dA_prev
-        activation_func = "sigmoid"
+        activation_func = "relu"
     return grads
 
 def regularize_weights(W, m, learning_rate, lamba):
@@ -146,17 +160,59 @@ def regularize_weights(W, m, learning_rate, lamba):
     W = W - np.multiply(np.divide(np.multiply(learning_rate, lamba), m), W)
     return W
 
-def update_parameters(m, parameters, grads, learning_rate, lamba):
+# A combination of Exponential Weighted Average and RMSProp with bias correction
+# To be used with mini-batches
+
+def momentum(dW, db, Vw, Vb, hyperparams, layer):
+    beta1 = hyperparams["beta1"]
+    Vw = np.multiply(beta1, Vw) + np.multiply((1-beta1), dW)
+    Vw_corrected = np.divide(Vw, (1-np.power(beta1, layer)))
+    Vb = np.multiply(beta1, Vb) + np.multiply((1-beta1), db)
+    Vb_corrected = np.divide(Vb, (1-np.power(beta1, layer)))
+    return Vw_corrected, Vb_corrected, Vw, Vb
+
+def rms_prop(dW, db, Sw, Sb, hyperparams, layer):
+    beta2 = hyperparams["beta2"]
+    epsilon = hyperparams["epsilon"]
+    Sw = np.multiply(beta2, Sw) + np.multiply((1-beta2), np.power(dW,2))
+    Sw_corrected = np.divide(Sw, (1-np.power(beta2, layer)))
+    Sb = np.multiply(beta2, Sb) + np.multiply((1-beta2), np.power(db, 2))
+    Sb_corrected = np.divide(Sb, (1-np.power(beta2, layer)))
+    dW_optimized = np.divide(dW, (np.sqrt(Sw_corrected + epsilon)))
+    db_optimized = np.divide(db, (np.sqrt(Sb_corrected + epsilon)))
+    return dW_optimized, db_optimized, Sw, Sb
+
+def adams_optimization(dW, db, Vw, Vb, Sw, Sb, hyperparams, layer):
+    beta1 = hyperparams["beta1"]
+    beta2 = hyperparams["beta2"]
+    epsilon = hyperparams["epsilon"]
+    Vw = np.multiply(beta1, Vw) + np.multiply((1-beta1), dW)
+    Vw_corrected = np.divide(Vw, (1-np.power(beta1, layer)))
+    Sw = np.multiply(beta2, Sw) + np.multiply((1-beta2), np.power(dW, 2))
+    Sw_corrected = np.divide(Sw, (1-np.power(beta2, layer)))
+    Vb = np.multiply(beta1, Vb) + np.multiply((1-beta1), db)
+    Vb_corrected = np.divide(Vb, (1-np.power(beta1, layer)))
+    Sb = np.multiply(beta2, Sb) + np.multiply((1-beta2), np.power(db, 2))
+    Sb_corrected = np.divide(Sb, (1-np.power(beta2, layer)))
+    dW_optimized = np.divide(Vw_corrected, (np.sqrt(Sw_corrected) + epsilon))
+    db_optimized = np.divide(Vb_corrected, (np.sqrt(Sb_corrected) + epsilon))
+    return dW_optimized, db_optimized, Vw, Vb, Sw, Sb
+
+def update_parameters(m, parameters, grads, hyperparams):
     new_params = []
+    learning_rate = hyperparams["learning_rate"]
     j=len(parameters)-1
     for i in range(len(parameters)):
-        W, b = parameters[i]
+        W, b, Vw, Vb, Sw, Sb = parameters[i]
         dW, db = grads[j]
+        #dW, db, Vw, Vb, Sw, Sb = adams_optimization(dW, db, Vw, Vb, Sw, Sb, hyperparams, j+1)
+        dW, db, Vw, Vb = momentum(dW, db, Vw, Vb, hyperparams, j+1)
+        #dW, db, Sw, Sb = rms_prop(dW, db, Sw, Sb, hyperparams, j+1)
         j = j-1
         W = W - (learning_rate * dW)
-        W = regularize_weights(W, m, learning_rate, lamba)
+        W = regularize_weights(W, m, learning_rate, hyperparams["lamba"])
         b = b - (learning_rate * db)
-        new_params.append((W, b))
+        new_params.append((W, b, Vw, Vb, Sw, Sb))
     return new_params
 
 def calculate_success(Y, AL):
@@ -168,7 +224,8 @@ def calculate_success(Y, AL):
             p[0][i] = 1
     return np.squeeze(np.sum(p, axis=1, keepdims=1)/len(p[0]))
 
-def train_model(X, Y, parameters, learning_rate, num_iterations, lamba = 0.01):
+def train_model(X, Y, parameters, hyperparams):
+    num_iterations = hyperparams["num_iterations"]
     N = len(parameters)
     m = X.shape[1]
     cost = []
@@ -176,13 +233,13 @@ def train_model(X, Y, parameters, learning_rate, num_iterations, lamba = 0.01):
     for i in range(num_iterations):
         AL, forward_cache = forward_propagate(X, parameters, N)
         c = compute_cost(AL, Y)
-        c = regularize_cost(c, m, lamba, parameters)
+        c = regularize_cost(c, m, hyperparams["lamba"], parameters)
         cost.append(c)
         if i % 100 == 0:
             print("Cost at iteration " + str(i) + " : ", str(c))
         grads = back_propagate(AL, Y, forward_cache)
         #print (grads)
-        parameters = update_parameters(m, parameters, grads, learning_rate, lamba)
+        parameters = update_parameters(m, parameters, grads, hyperparams)
     print ("Trained model success rate: " +  str(calculate_success(Y, AL) *100) + "%")
     return parameters, cost
 
@@ -206,9 +263,9 @@ def main(argv):
     np.random.seed(1)
     learn_dir = "./images"
     test_dir = "./test"
-    learning_rate = 0.01
-    num_iterations = 4000
-    dims = [4, 1]
+    hyperparams = initialize_hyperparams()
+
+    dims = hyperparams["dims"]
 
     try:
         opts, args = getopt.getopt(argv, "hl:t:r:i:n:",["help", "learndir=", "testdir=", "learnrate=", "iters=", "net="])
@@ -244,10 +301,10 @@ def main(argv):
     print(lists_dims)
     #Train the model
     parameters = initialize_parameters(lists_dims)
-    parameters, cost = train_model(XL, YL, parameters, learning_rate, num_iterations)
+    parameters, cost = train_model(XL, YL, parameters, hyperparams)
     # check out the success rate with a test run
     success_rate = test_model(XT, YT, parameters)
-    print ("Success rate: " + str(success_rate*100) + "%")
+    print ("Test Success rate: " + str(success_rate*100) + "%")
     plot_cost_gradient(cost)
 
 if __name__ == "__main__" :

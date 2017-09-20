@@ -110,6 +110,6 @@ parameters = sess.run(parameters)
 X_test, Y_test = collect_data("./test")
 predict_ZL = forward_propagation(X_test, parameters, len(list_dims))
 predict_AL = tf.sigmoid(predict_ZL)
-print(sess.run(predict_AL))
+print("Test data prediction:", sess.run(predict_AL))
 
 sess.close()

@@ -67,7 +67,7 @@ def regularize_weights(lamba, parameters, m):
 tf.reset_default_graph()
 tf.set_random_seed(1)
 # Setup the Neural network layers
-list_dims = [4, 1]
+list_dims = [4, 3, 1]
 # Collect the training set
 X, Y = collect_data("./images")
 

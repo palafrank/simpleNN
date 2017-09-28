@@ -6,6 +6,26 @@ from scipy import ndimage
 from os import listdir
 import matplotlib.pyplot as plt
 
+def Read_CSV(fname):
+    f = open(fname, "r")
+    Y = np.empty((1, 0))
+    X = np.empty((64*64*3,0))
+    i=0
+    for line in f:
+        data = line.split(',')
+        with urllib.request.urlopen(data[0]) as url:
+            f = io.BytesIO(url.read())
+        a = ndimage.imread(f, flatten=False)
+        b = scipy.misc.imresize(a, size=(64, 64))
+        b = b/255
+        c = b.reshape(64*64*3, 1)
+        X = np.hstack((X, c))
+        Y[0].append(int(data[1]))
+        i = i+1
+    print(Y)
+    return X, Y
+
+
 def Read_File(fname):
     a = ndimage.imread(fname, flatten=False)
     b = scipy.misc.imresize(a, size=(64, 64))
@@ -27,7 +47,6 @@ def collect_data(dirname):
         else:
             Y[0][i] = 1
         X = np.hstack((X, a))
-
         i = i+1
     return X, Y
 
@@ -35,11 +54,12 @@ def initialize_hyperparams():
     hyperparams = {}
     hyperparams["learning_rate"] = 0.01 # Learning rate of gradient descent
     hyperparams["num_iterations"] = 4000 # Number of iterations of propagation
-    hyperparams["dims"] = [4, 1] # Number of nodes in each layer of NN
+    hyperparams["dims"] = [4, 4, 3, 1] # Number of nodes in each layer of NN
     hyperparams["lamba"] = 0.01 # Regularization param lambda
     hyperparams["beta1"] = 0.9 # Exponential Weighted average param
     hyperparams["beta2"] = 0.999 # RMSProp param
     hyperparams["epsilon"] = 10 ** -8 # Adams optimization zero correction
+    hyperparams["minibatch"] = 100 # size of the minibatch, 0 indicates no minibatching
     return hyperparams
 
 # Initialize the parameters
@@ -98,7 +118,7 @@ def forward_propagate(X, parameters, N):
         if i == N-1 :
             activation_func = "sigmoid"
         else:
-            activation_func = "relu"
+            activation_func = "sigmoid"
         AL = forward_activation(Z, activation_func)
         forward_cache.append((A, Z, W, b))
     #print (AL)
@@ -151,7 +171,7 @@ def back_propagate(AL, Y, forward_cache):
         dA_prev, dW, db = back_propagate_activation(dA, cache, activation_func)
         grads.append((dW, db))
         dA = dA_prev
-        activation_func = "relu"
+        activation_func = "sigmoid"
     return grads
 
 def regularize_weights(W, m, learning_rate, lamba):
@@ -206,7 +226,7 @@ def update_parameters(m, parameters, grads, hyperparams):
         W, b, Vw, Vb, Sw, Sb = parameters[i]
         dW, db = grads[j]
         #dW, db, Vw, Vb, Sw, Sb = adams_optimization(dW, db, Vw, Vb, Sw, Sb, hyperparams, j+1)
-        dW, db, Vw, Vb = momentum(dW, db, Vw, Vb, hyperparams, j+1)
+        #dW, db, Vw, Vb = momentum(dW, db, Vw, Vb, hyperparams, j+1)
         #dW, db, Sw, Sb = rms_prop(dW, db, Sw, Sb, hyperparams, j+1)
         j = j-1
         W = W - (learning_rate * dW)
@@ -217,31 +237,64 @@ def update_parameters(m, parameters, grads, hyperparams):
 
 def calculate_success(Y, AL):
     p = np.around(AL)
+    #print("Activation: ", AL)
     for i in range(len(p[0])):
         if(p[0][i] != Y[0][i]):
             p[0][i] = 0
         else:
             p[0][i] = 1
+    print("Success Cal: ", p)
+    #print("Expectation: ", Y)
+    #print(p.shape)
+    #print(np.sum(p))
+    #print(len(p[0]))
     return np.squeeze(np.sum(p, axis=1, keepdims=1)/len(p[0]))
+
+def create_mini_batches(X, Y, batch_size, seed):
+    np.random.seed(seed)
+    mini_batches = []
+    if batch_size == 0:
+        mini_batches.append((X,Y))
+        return mini_batches
+    m = X.shape[1]
+    permutate = np.random.permutation(m)
+    X_shuffle = X[:, permutate]
+    Y_shuffle = Y[:, permutate]
+
+    num_batches = int(np.floor(m/batch_size))
+    for k in range(num_batches):
+        mini_batches.append((X[:, batch_size*k:batch_size*(k+1)], Y[:, batch_size*k:batch_size*(k+1)]))
+
+    if m%batch_size>0 :
+        mini_batches.append((X[:, batch_size*num_batches:], Y[:, batch_size*num_batches:]))
+    return mini_batches
+
+def run_one_epoch(seed, X, Y, parameters, hyperparams, costs, m):
+    N = len(parameters)
+    batches = create_mini_batches(X, Y, hyperparams["minibatch"], seed)
+    for batch in batches:
+        X,Y = batch
+        AL, forward_cache = forward_propagate(X, parameters, N)
+        c = compute_cost(AL, Y)
+        c = regularize_cost(c, m, hyperparams["lamba"], parameters)
+        costs.append(c)
+        grads = back_propagate(AL, Y, forward_cache)
+        parameters = update_parameters(m, parameters, grads, hyperparams)
+    return parameters, costs, AL
+
 
 def train_model(X, Y, parameters, hyperparams):
     num_iterations = hyperparams["num_iterations"]
     N = len(parameters)
     m = X.shape[1]
-    cost = []
-    print ("Num layers:" + str(N))
+    costs = []
     for i in range(num_iterations):
-        AL, forward_cache = forward_propagate(X, parameters, N)
-        c = compute_cost(AL, Y)
-        c = regularize_cost(c, m, hyperparams["lamba"], parameters)
-        cost.append(c)
-        if i % 100 == 0:
-            print("Cost at iteration " + str(i) + " : ", str(c))
-        grads = back_propagate(AL, Y, forward_cache)
-        #print (grads)
-        parameters = update_parameters(m, parameters, grads, hyperparams)
+        parameters, costs, AL = run_one_epoch(i, X, Y, parameters, hyperparams, costs, m)
+        if i%100 == 0:
+            print ("Cost after ", i, " iterations:", costs[-1])
+    AL, forward_cache = forward_propagate(X, parameters, N)
     print ("Trained model success rate: " +  str(calculate_success(Y, AL) *100) + "%")
-    return parameters, cost
+    return parameters, costs
 
 def test_model(X, Y, parameters):
     m = X.shape[1]
@@ -298,7 +351,7 @@ def main(argv):
     lists_dims = [XL.shape[0]]
     for num in dims:
         lists_dims.append(num)
-    print(lists_dims)
+    print("NN Dimensions: ", lists_dims)
     #Train the model
     parameters = initialize_parameters(lists_dims)
     parameters, cost = train_model(XL, YL, parameters, hyperparams)

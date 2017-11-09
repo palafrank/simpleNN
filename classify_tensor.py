@@ -4,8 +4,6 @@ import scipy
 from scipy import ndimage
 from os import listdir
 
-
-
 def Read_File(fname):
     a = ndimage.imread(fname, flatten=False)
     b = scipy.misc.imresize(a, size=(64, 64))
@@ -30,86 +28,84 @@ def collect_data(dirname):
 
         i = i+1
     return X, Y
+'''
+def shuffle_data(X, Y, batch_size=250):
+    X_dims = X.shape
+    Y_dims = Y.shape
+    #print(X_dims, Y_dims)
+    num_mini = int(X.shape[1]/batch_size)
+    seq = [i for i in range(X_dims[1])]
+    np.random.shuffle(seq)
+    minibatches = []
+    seq_index = 0
+    for i in range(num_mini):
+        mb_x = np.empty((X.shape[0],0))
+        mb_y = np.empty((1, 0))
+        for j in range(batch_size):
+            mb_x = np.hstack((mb_x, X[:,seq[seq_index]:seq[seq_index]+1]))
+            mb_y = np.hstack((mb_y, Y[:,seq[seq_index]:seq[seq_index]+1]))
+            seq_index = seq_index + 1
+        #print(mb_x.shape, mb_y.shape)
+        minibatches.append((mb_x, mb_y))
+    return minibatches
 
-def initialize_parameters(input_layer, list_dims):
-    parameters = []
-    n_a = input_layer
-    for dim in range(len(list_dims)):
-        W = tf.get_variable("W"+str(dim), dtype=tf.float64, shape=[list_dims[dim], n_a], initializer =tf.contrib.layers.xavier_initializer())
-        b = tf.get_variable("b"+str(dim), dtype=tf.float64, shape=[list_dims[dim], 1], initializer=tf.zeros_initializer)
-        parameters.append((W, b))
-        n_a = list_dims[dim]
-    return parameters
-
-def forward_propagation(X, parameters, layers):
-    A = X
-    for i in range(layers):
-        W, b = parameters[i]
-        Z = tf.add(tf.matmul(W, A), b)
-        #A = tf.nn.relu(Z, name="Activation"+str(i+1))
-        A = tf.sigmoid(Z)
-    return Z
-
-def regularize_cost(loss, lamba, parameters):
-    W, b = parameters[len(parameters)-1]
-    loss = tf.reduce_mean(loss + lamba * tf.nn.l2_loss(W))
-    return loss
-
-def regularize_weights(lamba, parameters, m):
-    for i in range(len(parameters)):
-        W, b = parameters[i]
-        W = tf.subtract(W, tf.divide(0.01 * lamba,m) * W)
-        parameters[i] = (W, b)
-    return parameters
-
-
+'''
+def shuffle_data(X, Y):
+    seq = [i for i in range(X.shape[1])]
+    np.random.shuffle(seq)
+    minibatches = []
+    for i, data in enumerate(seq):
+        X[:, i], X[:, data] = X[:, data], X[:, i]
+        Y[:, i], Y[:, data] = Y[:, data], Y[:, i]
+    minibatches.append((X,Y))
+    return minibatches
 
 tf.reset_default_graph()
 tf.set_random_seed(1)
-# Setup the Neural network layers
-list_dims = [4, 3, 1]
-# Collect the training set
 X, Y = collect_data("./images")
 
-# Initialize the weights for every layer
-parameters = initialize_parameters(X.shape[0], list_dims)
+X_test, Y_test = collect_data("./test")
+x = tf.placeholder(tf.float32, shape=[X.shape[0], None], name="Input")
+y = tf.placeholder(tf.float32, shape=[1, None], name="Label")
 
-# Forward propagate
-ZL = forward_propagation(X, parameters, len(list_dims))
+#W0 = tf.Variable(tf.zeros([10, X.shape[0]]), name="W0")
+#b0 = tf.Variable(tf.zeros([10,1]), name="b0")
+W0 = tf.get_variable("W0", dtype=tf.float32, shape=[10, X.shape[0]], initializer =tf.contrib.layers.xavier_initializer())
+b0 = tf.get_variable("b0", dtype=tf.float32, shape=[10, 1], initializer=tf.zeros_initializer)
+Z0 = tf.add(tf.matmul(W0, x),b0)
+A0 = tf.nn.relu(Z0)
+W1 = tf.get_variable("W1", dtype=tf.float32, shape=[1, 10], initializer =tf.contrib.layers.xavier_initializer())
+b1 = tf.get_variable("b1", dtype=tf.float32, shape=[1, 1], initializer=tf.zeros_initializer)
+Z1 = tf.add(tf.matmul(W1, A0), b1)
+cost = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels = y, logits = Z1, name="Activation"))
 
-#Back propagate and reduce cost
-AL = tf.nn.sigmoid_cross_entropy_with_logits(labels = Y, logits = ZL)
-#cost = regularize_cost(tf.reduce_mean(AL), 0.1, parameters)
-cost = tf.reduce_mean(AL)
+predict = tf.sigmoid(Z1)
+success_rate = tf.multiply(tf.reduce_mean(tf.cast(tf.equal(tf.round(predict), y), tf.float32)), 100)
 
-#optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.01, name="Optimizer")
-optimizer = tf.train.MomentumOptimizer(learning_rate = 0.01, momentum=0.9)
-train = optimizer.minimize(cost)
+train_step = tf.train.AdamOptimizer().minimize(cost)
+#train_step = tf.train.MomentumOptimizer(learning_rate = 0.01, momentum=0.9, name="Optimizer").minimize(A1)
+#train_step = tf.train.AdamOptimizer(name="Optimizer").minimize(A1)
 
-
-# Setup session and initialize tensors
 init = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init)
-
-# Run the training iterations
+writer = tf.summary.FileWriter("/tmp/tensor_classify")
+writer.add_graph(sess.graph)
+num_epochs = 2000
 costs = []
-for i in range(6000):
-    _, new_cost, _ = sess.run([AL,cost, train])
-    #regularize_weights(0.1, parameters, X.shape[1])
-    if (i % 1000) == 0:
-        print("Training iteration " + str(i), new_cost)
-    costs.append(new_cost)
-print("Final cost = ", costs[-1])
-#print(sess.run(loss))
+np.random.seed(1)
+for i in range(num_epochs):
+    mini_batches = shuffle_data(X, Y)
+    for data in mini_batches:
+        data_x, data_y = data
+        #print(data_x.shape, data_y.shape)
+        mycost, _ = sess.run([cost, train_step], feed_dict={x:data_x, y:data_y})
+        costs.append(mycost)
+    if i % 100 == 0:
+        cal_cost = sess.run(cost, feed_dict={x:X, y:Y})
+        print("Cost:", cal_cost)
+        print(sess.run(success_rate, feed_dict={x:X, y:Y}), "%")
 
-#merged = tf.summary.merge_all()
-#my_writer = tf.summary.FileWriter("./", sess.graph)
-parameters = sess.run(parameters)
-
-X_test, Y_test = collect_data("./test")
-predict_ZL = forward_propagation(X_test, parameters, len(list_dims))
-predict_AL = tf.sigmoid(predict_ZL)
-print("Test data prediction:", sess.run(predict_AL))
+print(sess.run(success_rate, feed_dict={x:X_test, y:Y_test}), "%")
 
 sess.close()

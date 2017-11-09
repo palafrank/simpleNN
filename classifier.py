@@ -16,9 +16,9 @@ def Read_CSV(fname):
         with urllib.request.urlopen(data[0]) as url:
             f = io.BytesIO(url.read())
         a = ndimage.imread(f, flatten=False)
-        b = scipy.misc.imresize(a, size=(64, 64))
+        b = scipy.misc.imresize(a, size=(128, 128))
         b = b/255
-        c = b.reshape(64*64*3, 1)
+        c = b.reshape(128*128*3, 1)
         X = np.hstack((X, c))
         Y[0].append(int(data[1]))
         i = i+1
@@ -28,16 +28,16 @@ def Read_CSV(fname):
 
 def Read_File(fname):
     a = ndimage.imread(fname, flatten=False)
-    b = scipy.misc.imresize(a, size=(64, 64))
+    b = scipy.misc.imresize(a, size=(128, 128))
     #Normalize data. 255 beecause max pixel value is 255
     b = b/255
-    c = b.reshape(64*64*3, 1)
+    c = b.reshape(128*128*3, 1)
     return c
 
 def collect_data(dirname):
     files = listdir(dirname)
     Y = np.empty((1, len(files)))
-    X = np.empty((64*64*3,0))
+    X = np.empty((128*128*3,0))
 
     i = 0
     for f in files:
@@ -226,7 +226,7 @@ def update_parameters(m, parameters, grads, hyperparams):
         W, b, Vw, Vb, Sw, Sb = parameters[i]
         dW, db = grads[j]
         #dW, db, Vw, Vb, Sw, Sb = adams_optimization(dW, db, Vw, Vb, Sw, Sb, hyperparams, j+1)
-        #dW, db, Vw, Vb = momentum(dW, db, Vw, Vb, hyperparams, j+1)
+        dW, db, Vw, Vb = momentum(dW, db, Vw, Vb, hyperparams, j+1)
         #dW, db, Sw, Sb = rms_prop(dW, db, Sw, Sb, hyperparams, j+1)
         j = j-1
         W = W - (learning_rate * dW)
